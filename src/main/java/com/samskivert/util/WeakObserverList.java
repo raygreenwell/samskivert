@@ -7,6 +7,9 @@ package com.samskivert.util;
 
 import java.lang.ref.WeakReference;
 
+import java.util.HashSet;
+import java.util.Set;
+
 /**
  * An {@link ObserverList} equivalent that does not prevent added observers from being
  * garbage-collected.
@@ -39,11 +42,13 @@ public class WeakObserverList<T> extends ObserverList<T>
 
     @Override public boolean add (int index, T element)
     {
+        // no maybePrune() here: pruning would shift the meaning of the caller's index
         return _delegate.add(index, new WeakReference<T>(element));
     }
 
     @Override public boolean add (T element)
     {
+        maybePrune();
         return _delegate.add(new WeakReference<T>(element));
     }
 
@@ -79,12 +84,20 @@ public class WeakObserverList<T> extends ObserverList<T>
      */
     public void prune ()
     {
-        // applying an op prunes collected observers, so just apply a NOOP op
-        apply(new ObserverOp<T>() {
-            public boolean apply (T obs) {
-                return true;
-            }
-        });
+        _pruneThreshold = Math.max(MIN_PRUNE_THRESHOLD, 2 * _delegate.compact());
+    }
+
+    /**
+     * Prunes when the list has doubled since the last prune, keeping {@link #add(Object)}
+     * amortized constant. Notification is the only other point at which collected references
+     * are removed, so a rarely-notified list would otherwise grow without bound and (with the
+     * SAFE_IN_ORDER policy) pay an ever-larger array copy on every add.
+     */
+    protected void maybePrune ()
+    {
+        if (_delegate.size() >= _pruneThreshold) {
+            prune();
+        }
     }
 
     protected WeakObserverList (Policy notifyPolicy)
@@ -136,6 +149,25 @@ public class WeakObserverList<T> extends ObserverList<T>
         @Override protected Object observerForLog (WeakReference<T> ref) {
             return ref.get();
         }
+
+        /**
+         * Removes all collected references in a single pass and returns the new size.
+         */
+        public int compact () {
+            Set<WeakReference<T>> dead = null;
+            for (WeakReference<T> ref : _list) {
+                if (ref.get() == null) {
+                    if (dead == null) {
+                        dead = new HashSet<WeakReference<T>>();
+                    }
+                    dead.add(ref);
+                }
+            }
+            if (dead != null) {
+                _list.removeAll(dead);
+            }
+            return _list.size();
+        }
     }
 
     /** A delegate list that contains weak reference wrapped elements. */
@@ -143,4 +175,10 @@ public class WeakObserverList<T> extends ObserverList<T>
 
     /** The wrapper op. */
     protected DerefOp<T> _derefOp = new DerefOp<T>();
+
+    /** Prune when the delegate reaches this size: twice the live count as of the last prune. */
+    protected int _pruneThreshold = MIN_PRUNE_THRESHOLD;
+
+    /** The minimum size at which pruning kicks in. */
+    protected static final int MIN_PRUNE_THRESHOLD = 32;
 }
