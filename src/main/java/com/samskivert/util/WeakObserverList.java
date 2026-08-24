@@ -59,8 +59,10 @@ public class WeakObserverList<T> extends ObserverList<T>
 
     @Override public void apply (ObserverOp<T> obop)
     {
-        _derefOp.init(obop);
-        _delegate.apply(_derefOp);
+        _delegate.apply(ref -> {
+          var observer = ref.get();
+          return observer != null && obop.apply(observer);
+        });
     }
 
     @Override public int size ()
@@ -106,30 +108,6 @@ public class WeakObserverList<T> extends ObserverList<T>
     }
 
     /**
-     * An operation that resolves a reference and applies a wrapped op.
-     */
-    protected static class DerefOp<T> implements ObserverOp<WeakReference<T>>
-    {
-        /** (Re)initializes this op with a reference to the wrapped op. */
-        public void init (ObserverOp<T> op) {
-            _op = op;
-        }
-
-        // documentation inherited from interface ObserverOp
-        public boolean apply (WeakReference<T> ref) {
-            T observer = ref.get();
-            return observer != null && _op.apply(observer);
-        }
-
-        @Override public String toString () {
-            return "DerefOp:" + _op;
-        }
-
-        /** The wrapped op. */
-        protected ObserverOp<T> _op;
-    }
-
-    /**
      * ObserverList extension that dereferences elements when searching for a value.
      */
     protected static class WrappedList<T> extends ObserverList.Impl<WeakReference<T>>
@@ -172,9 +150,6 @@ public class WeakObserverList<T> extends ObserverList<T>
 
     /** A delegate list that contains weak reference wrapped elements. */
     protected WrappedList<T> _delegate;
-
-    /** The wrapper op. */
-    protected DerefOp<T> _derefOp = new DerefOp<T>();
 
     /** Prune when the delegate reaches this size: twice the live count as of the last prune. */
     protected int _pruneThreshold = MIN_PRUNE_THRESHOLD;
